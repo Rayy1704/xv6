@@ -13,7 +13,7 @@ char*fmt_name(char *path)
   return p;//returnseverything after the last slash
 }
 
-void find(char *path, char *target)//take current path and target filename
+void find(char *path, char *target, char** args)//take current path and target filename
 {
   char buf[512], *p;//buffer to hold path
   int fd;//file descriptor
@@ -34,7 +34,30 @@ void find(char *path, char *target)//take current path and target filename
   switch(st.type){//checking against file type
   case T_FILE:
     if(strcmp(fmt_name(path), target) == 0){//if file name is same as target then print path
-      printf("%s\n", path);
+      if(args){//if exec command is provided
+        // 1. Prepare a new argument list
+        char *new_argv[32]; // Use MAXARG from param.h if included, or a safe size like 32
+        int i = 0;
+        // Copy the original command (e.g., "echo", "hi")
+        while(args[i] != 0 && i < 30) { 
+          new_argv[i] = args[i];
+          i++;
+        }
+        // 2. Append the found file path
+        new_argv[i] = path; 
+        i++;
+        
+        // 3. Null terminate the list
+        new_argv[i] = 0;
+        if(fork() == 0){//create child process
+          exec(new_argv[0], new_argv);//execute command with arguments
+          exit(0);
+        } else {
+          wait(0);//parent waits for child to finish
+        }
+      }else{
+        printf("%s\n", path);//print path
+      }
     }
     break;
 
@@ -57,7 +80,7 @@ void find(char *path, char *target)//take current path and target filename
       memmove(p, de.name, DIRSIZ);//append entry name to path
       p[DIRSIZ] = 0;
 
-      find(buf, target);//recursive call to find for new path
+      find(buf, target,args);//recursive call to find for new path
     }
     break;
   }
@@ -67,15 +90,16 @@ void find(char *path, char *target)//take current path and target filename
 int
 main(int argc, char *argv[])
 {
-  if(argc > 3){
-    fprintf(2, "Usage: find <path> <target>\n");
-    exit(1); 
+  if(argc > 4 && strcmp(argv[3],"-exec")==0){
+    find(argv[1],argv[2],&argv[4]);
   }
-
-  if(argc == 2){
-     find(".", argv[1]); 
+  else if(argc == 2){
+     find(".", argv[1],0); 
   } else if(argc == 3){
-     find(argv[1], argv[2]);
+     find(argv[1], argv[2],0);
+  }else{
+    printf("Usage: find [path] target_name [-exec command]\n");
+    exit(1);
   }
   
   exit(0);
