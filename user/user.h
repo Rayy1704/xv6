@@ -1,3 +1,4 @@
+#include "kernel/types.h"
 #define SBRK_ERROR ((char *)-1)
 
 struct stat;
@@ -24,6 +25,8 @@ int getpid(void);
 char* sys_sbrk(int,int);
 int pause(int);
 int uptime(void);
+int mul(int, int);
+int symlink(const char* target, const char* path);
 
 // ulib.c
 int stat(const char*, struct stat*);

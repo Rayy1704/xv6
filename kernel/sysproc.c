@@ -107,3 +107,12 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64 sys_mul(void)
+{
+  int a,b;
+  argint(0,&a);
+  argint(1,&b);
+  long long prod = (long long)a* (long long)b;
+  return (uint64)prod;  
+}

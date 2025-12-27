@@ -439,6 +439,95 @@ bmap(struct inode *ip, uint bn)
     brelse(bp);
     return addr;
   }
+  // Double-indirect region: covers NINDIRECT * NINDIRECT blocks.
+  bn -= NINDIRECT;
+  if(bn < NINDIRECT * NINDIRECT){
+    // Allocate/load the double-indirect block as needed.
+    uint daddr = ip->addrs[NDIRECT+1];
+    if(daddr == 0){
+      daddr = balloc(ip->dev);
+      if(daddr == 0)
+        return 0;
+      ip->addrs[NDIRECT+1] = daddr;
+    }
+
+    // Read the double-indirect block table.
+    struct buf *bp1 = bread(ip->dev, daddr);
+    uint *a1 = (uint*)bp1->data; // pointers to singly-indirect blocks
+
+    uint di = bn / NINDIRECT;    // which singly-indirect block
+    uint si = bn % NINDIRECT;    // which entry within that block
+
+    // Allocate/load the singly-indirect block pointed by a1[di].
+    uint saddr = a1[di];
+    if(saddr == 0){
+      saddr = balloc(ip->dev);
+      if(saddr == 0){
+        brelse(bp1);
+        return 0;
+      }
+      a1[di] = saddr;
+      log_write(bp1);
+    }
+    brelse(bp1);
+
+    // Read the singly-indirect block.
+    struct buf *bp2 = bread(ip->dev, saddr);
+    uint *a2 = (uint*)bp2->data; // pointers to data blocks
+
+    addr = a2[si];
+    if(addr == 0){
+      addr = balloc(ip->dev);
+      if(addr){
+        a2[si] = addr;
+        log_write(bp2);
+      }
+    }
+    brelse(bp2);
+    return addr;
+  }
+
+  // Double-indirect blocks
+  bn -= NINDIRECT;
+  if(bn < NINDIRECT * NINDIRECT){
+    // Allocate/load double-indirect block if necessary.
+    if((addr = ip->addrs[NDIRECT+1]) == 0){
+      addr = balloc(ip->dev);
+      if(addr == 0)
+        return 0;
+      ip->addrs[NDIRECT+1] = addr;
+    }
+    // Read double-indirect block (array of NINDIRECT uint pointers to singly-indirect blocks)
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    uint di = bn / NINDIRECT;
+    uint si = bn % NINDIRECT;
+    uint saddr = a[di];
+    if(saddr == 0){
+      saddr = balloc(ip->dev);
+      if(saddr){
+        a[di] = saddr;
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+    if(saddr == 0)
+      return 0;
+
+    // Now handle the singly-indirect block at a[di]
+    bp = bread(ip->dev, saddr);
+    a = (uint*)bp->data;
+    addr = a[si];
+    if(addr == 0){
+      addr = balloc(ip->dev);
+      if(addr){
+        a[si] = addr;
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+    return addr;
+  }
 
   panic("bmap: out of range");
 }
@@ -450,6 +539,7 @@ itrunc(struct inode *ip)
 {
   int i, j;
   struct buf *bp;
+  struct buf *bp2;
   uint *a;
 
   for(i = 0; i < NDIRECT; i++){
@@ -469,6 +559,48 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  // Free double-indirect blocks
+  if(ip->addrs[NDIRECT+1]){
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a = (uint*)bp->data; // a points to NINDIRECT pointers to singly-indirect blocks
+    for(i = 0; i < NINDIRECT; i++){
+      if(a[i]){
+        bp2 = bread(ip->dev, a[i]);
+        uint *a2 = (uint*)bp2->data;
+        for(j = 0; j < NINDIRECT; j++){
+          if(a2[j])
+            bfree(ip->dev, a2[j]);
+        }
+        brelse(bp2);
+        bfree(ip->dev, a[i]);
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    ip->addrs[NDIRECT+1] = 0;
+  }
+
+  // Free double-indirect blocks (and the nested singly-indirect/data blocks).
+  if(ip->addrs[NDIRECT+1]){
+    struct buf *bp1 = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    uint *a1 = (uint*)bp1->data;
+    for(int di = 0; di < NINDIRECT; di++){
+      if(a1[di]){
+        struct buf *bp2 = bread(ip->dev, a1[di]);
+        uint *a2 = (uint*)bp2->data;
+        for(int si = 0; si < NINDIRECT; si++){
+          if(a2[si])
+            bfree(ip->dev, a2[si]);
+        }
+        brelse(bp2);
+        bfree(ip->dev, a1[di]);
+      }
+    }
+    brelse(bp1);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    ip->addrs[NDIRECT+1] = 0;
   }
 
   ip->size = 0;

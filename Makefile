@@ -147,6 +147,10 @@ UPROGS=\
 	$U/_sixfive\
 	$U/_memdump\
 	$U/_find\
+	$U/_mul\
+	$U/_symlinktest\
+	$U/_bigfile\
+
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

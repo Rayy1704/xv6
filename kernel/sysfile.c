@@ -333,6 +333,38 @@ sys_open(void)
       end_op();
       return -1;
     }
+
+    // Follow symlinks unless O_NOFOLLOW is specified.
+    if(!(omode & O_NOFOLLOW)){
+      int depth = 0;
+      char target[MAXPATH];
+      while(ip->type == T_SYMLINK){
+        if(++depth > 10){
+          // Too many levels (cycle?)
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+        int r = readi(ip, 0, (uint64)target, 0, MAXPATH);
+        if(r < 0){
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+        target[MAXPATH-1] = '\0';
+        iunlockput(ip);
+        if((ip = namei(target)) == 0){
+          end_op();
+          return -1;
+        }
+        ilock(ip);
+        if(ip->type == T_DIR && omode != O_RDONLY){
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+      }
+    }
   }
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
@@ -368,6 +400,34 @@ sys_open(void)
   end_op();
 
   return fd;
+}
+
+// Create a symbolic link at path that refers to target.
+uint64
+sys_symlink(void)
+{
+  char target[MAXPATH], path[MAXPATH];
+  int n1 = argstr(0, target, MAXPATH);
+  int n2 = argstr(1, path, MAXPATH);
+  if(n1 < 0 || n2 < 0)
+    return -1;
+
+  begin_op();
+  struct inode *ip = create(path, T_SYMLINK, 0, 0);
+  if(ip == 0){
+    end_op();
+    return -1;
+  }
+  // ip is locked by create()
+  int len = strlen(target) + 1; // include terminator
+  if(writei(ip, 0, (uint64)target, 0, len) != len){
+    iunlockput(ip);
+    end_op();
+    return -1;
+  }
+  iunlockput(ip);
+  end_op();
+  return 0;
 }
 
 uint64
